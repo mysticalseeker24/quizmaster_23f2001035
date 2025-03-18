@@ -1,0 +1,160 @@
+/* General Styles */
+body {
+  background: linear-gradient(to right, #e3f2fd, #bbdefb);
+  font-family: 'Poppins', sans-serif;
+  color: #333;
+}
+
+/* Navbar Styling */
+.navbar {
+  background-color: #1565c0 !important;
+  padding: 12px 20px;
+  box-shadow: 0px 4px 10px rgba(0, 0, 0, 0.1);
+}
+
+.navbar-brand {
+  font-size: 1.5rem;
+  font-weight: bold;
+  color: #fff !important;
+}
+
+.navbar-nav .nav-link {
+  color: #fff !important;
+  font-size: 1rem;
+  margin-right: 15px;
+  transition: all 0.3s ease-in-out;
+}
+
+.navbar-nav .nav-link:hover {
+  color: #ffeb3b !important;
+  transform: scale(1.1);
+}
+
+/* Container Styles */
+.container {
+  margin-top: 40px;
+}
+
+/* Subject Card */
+.col {
+  background: white;
+  border-radius: 12px;
+  box-shadow: 0px 5px 15px rgba(0, 0, 0, 0.1);
+  padding: 20px;
+  margin-bottom: 30px;
+  transition: transform 0.3s ease-in-out;
+}
+
+.col:hover {
+  transform: scale(1.03);
+}
+
+/* Table Styling */
+.table {
+  margin-top: 20px;
+  border-radius: 8px;
+  overflow: hidden;
+}
+
+.table thead {
+  background: #1565c0;
+  color: white;
+  font-size: 1rem;
+}
+
+.table tbody tr {
+  transition: background 0.3s;
+}
+
+.table tbody tr:hover {
+  background: #e3f2fd;
+}
+
+/* Buttons */
+.btn {
+  border-radius: 8px;
+  transition: all 0.3s ease-in-out;
+  font-weight: bold;
+}
+
+.btn-warning {
+  background-color: #ffb300;
+  border-color: #ffa000;
+  color: white;
+}
+
+.btn-warning:hover {
+  background-color: #ff6f00;
+  border-color: #ff6f00;
+}
+
+.btn-danger {
+  background-color: #d32f2f;
+  border-color: #c62828;
+  color: white;
+}
+
+.btn-danger:hover {
+  background-color: #b71c1c;
+  border-color: #b71c1c;
+}
+
+.btn-success {
+  background-color: #388e3c;
+  border-color: #2e7d32;
+  color: white;
+}
+
+.btn-success:hover {
+  background-color: #1b5e20;
+  border-color: #1b5e20;
+}
+
+.add-subject-btn, .add-chapter-btn {
+  width: 100%;
+  margin-top: 15px;
+}
+
+/* Modal Styling */
+.modal-content {
+  border-radius: 12px;
+}
+
+.modal-header {
+  background: #1565c0;
+  color: white;
+  border-radius: 12px 12px 0 0;
+}
+
+.modal-title {
+  font-size: 1.2rem;
+}
+
+.modal-body {
+  padding: 20px;
+}
+
+/* Form Inputs */
+.form-control {
+  border-radius: 8px;
+  border: 1px solid #ccc;
+  padding: 10px;
+  font-size: 1rem;
+}
+
+.form-control:focus {
+  border-color: #1565c0;
+  box-shadow: 0px 0px 8px rgba(21, 101, 192, 0.5);
+}
+
+/* Footer */
+footer {
+  background: #1565c0;
+  color: white;
+  text-align: center;
+  padding: 15px;
+  margin-top: 30px;
+  font-size: 0.9rem;
+}
+
+
