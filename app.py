@@ -6,7 +6,7 @@ from flask_migrate import Migrate
 from werkzeug.security import generate_password_hash, check_password_hash
 
 app = Flask(__name__)
-app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///quiz_master.db'
+app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///quiz_master.sqlite3'
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False 
 app.config['SECRET_KEY'] = 'your_secret_key_here'
 db = SQLAlchemy(app)
@@ -179,7 +179,7 @@ def quizmanagement():
     subjects = Subject.query.all()
     chapters = Chapter.query.all()
     quizzes = Quiz.query.all()
-    questions = Question.query.all
+    questions = Question.query.all()
     
     return render_template('quizmanagement.html', 
                            all_subjects=subjects, 
