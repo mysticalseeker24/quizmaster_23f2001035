@@ -13,11 +13,9 @@
         <h3>Quiz Details</h3>
         <table class="table table-bordered">
             <tr><th>ID</th><td>{{ quiz.id }}</td></tr>
-            <tr><th>Subject</th><td>{{ quiz.subject }}</td></tr>
-            <tr><th>Chapter</th><td>{{ quiz.chapter }}</td></tr>
-            <tr><th>No. of Questions</th><td>{{ quiz.num_questions }}</td></tr>
-            <tr><th>Scheduled Date</th><td>{{ quiz.date }}</td></tr>
-            <tr><th>Duration</th><td>{{ quiz.duration }}</td></tr>
+            <tr><th>Chapter</th><td>   {{ chapter_name }}</td></tr>
+            <tr><th>Subject</th><td>   {{ subject_name }}</td></tr>
+            <tr><th>No. of Questions</th><td>{{ num_questions if num_questions else 'N/A' }}</td></tr>           
         </table>
         <button onclick="redirectToDashboard()" class="btn btn-secondary">Close</button>
         <script>

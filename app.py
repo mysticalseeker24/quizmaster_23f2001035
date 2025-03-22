@@ -1,14 +1,17 @@
 from flask import Flask, render_template, request, redirect, url_for, session, flash
 from flask_sqlalchemy import SQLAlchemy
 from flask_migrate import Migrate 
-
-
+import matplotlib.pyplot as plt
+import io
+import base64
+import traceback 
 from werkzeug.security import generate_password_hash, check_password_hash
+from sqlalchemy.sql import func
 
 app = Flask(__name__)
 app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///quiz_master.sqlite3'
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False 
-app.config['SECRET_KEY'] = 'your_secret_key_here'
+app.config['SECRET_KEY'] = 'secret_key_here'
 db = SQLAlchemy(app)
 migrate= Migrate (app,db)
 
@@ -24,22 +27,26 @@ class User(db.Model):
 class Subject(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     name = db.Column(db.String(100), unique=True, nullable=False)
-    description= db.Column(db.Text,nullable=True)
-    chapters= db.relationship('Chapter', backref='subject', lazy=True)
+    description = db.Column(db.Text, nullable=True)
+    chapters = db.relationship('Chapter', back_populates='subject', lazy=True)
 
 class Chapter(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     name = db.Column(db.String(100), nullable=False)
     description = db.Column(db.Text)
     subject_id = db.Column(db.Integer, db.ForeignKey('subject.id'), nullable=False)
-    questions = db.relationship('Question', backref='chapter', lazy=True)
-
+    quizzes = db.relationship('Quiz', back_populates='chapter')
+    subject = db.relationship('Subject', back_populates='chapters')
 class Quiz(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     name = db.Column(db.String(100), nullable=False)
     chapter_id = db.Column(db.Integer, db.ForeignKey('chapter.id'), nullable=False)
     duration = db.Column(db.String(10), nullable=False)
-    chapter = db.relationship('Chapter', backref='quizzes')
+    chapter = db.relationship('Chapter', back_populates='quizzes')
+    questions = db.relationship('Question', back_populates='quiz', lazy=True)  
+    # Access subject through chapter
+    # subject = db.relationship('Subject', secondary='chapter', viewonly=True)  # Not needed here
+
 class Question(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     quiz_id = db.Column(db.Integer, db.ForeignKey('quiz.id'), nullable=False)
@@ -50,7 +57,7 @@ class Question(db.Model):
     option4 = db.Column(db.String(200), nullable=False)
     correct_option = db.Column(db.Integer, nullable=False)
     chapter_id = db.Column(db.Integer, db.ForeignKey('chapter.id'), nullable=False)
-
+    quiz = db.relationship('Quiz', back_populates='questions')
 
 class Score(db.Model):
     id = db.Column(db.Integer, primary_key=True)
@@ -58,6 +65,8 @@ class Score(db.Model):
     quiz_id = db.Column(db.Integer, db.ForeignKey('quiz.id'), nullable=False)
     score = db.Column(db.Integer, nullable=False)
     timestamp = db.Column(db.String(20))
+    user = db.relationship('User', backref='scores', lazy=True)
+    quiz = db.relationship('Quiz', backref='scores', lazy=True)
 
 class UserAnswer(db.Model):
     id = db.Column(db.Integer, primary_key=True)
@@ -66,7 +75,6 @@ class UserAnswer(db.Model):
     selected_option = db.Column(db.String(200), nullable=False)
 
 ADMIN_CREDENTIALS = {'email': 'admin@quizmaster.com', 'password': 'admin123'}
-
 @app.route('/')
 def index():
     return render_template('index.html')
@@ -170,6 +178,31 @@ def admin_dashboard():
         chapter_question_counts=chapter_question_counts
     )
 
+@app.route('/search', methods=['GET', 'POST'])
+def search():
+    query = request.args.get('query')  # Get the search query from the URL parameters
+    if query:
+        # Search quizzes
+        quizzes = Quiz.query.filter(Quiz.name.ilike(f'%{query}%')).all()
+        
+        # Search subjects
+        subjects = Subject.query.filter(Subject.name.ilike(f'%{query}%')).all()
+        
+        # Search users (if needed)
+        users = User.query.filter(User.full_name.ilike(f'%{query}%') | User.email.ilike(f'%{query}%')).all()
+
+        return render_template(
+            'search_results.html',
+            query=query,
+            quizzes=quizzes,
+            subjects=subjects,
+            users=users
+        )
+    else:
+        return redirect(url_for('admin_dashboard'))  # Redirect to home if no query is provided
+
+
+
 
 @app.route('/quizmanagement')
 def quizmanagement():
@@ -178,7 +211,7 @@ def quizmanagement():
     
     subjects = Subject.query.all()
     chapters = Chapter.query.all()
-    quizzes = Quiz.query.all()
+    quizzes = Quiz.query.options(db.joinedload(Quiz.questions)).all()
     questions = Question.query.all()
     
     return render_template('quizmanagement.html', 
@@ -199,15 +232,6 @@ def user_dashboard():
 
 
 
-@app.route('/scores')
-def scores():
-    if 'user_id' not in session:
-        return redirect(url_for('userlogin')) 
-
-    user_id = session['user_id']
-    user_scores = Score.query.filter_by(user_id=user_id).all()
-
-    return render_template('scores.html', scores=user_scores)
 
 @app.route('/add_subject', methods=['POST'])
 def add_subject():
@@ -258,6 +282,22 @@ def edit_subject(subject_id):
         flash('Subject not found', 'danger')
     return redirect(url_for('admin_dashboard'))
 
+@app.route('/edit_chapter/<int:chapter_id>', methods=['POST'])
+def edit_chapter(chapter_id):
+    chapter = Chapter.query.get(chapter_id)
+    if chapter:
+        new_name = request.form.get('chapter_name')
+        new_description = request.form.get('description')
+        chapter.name = new_name
+        chapter.description = new_description
+        db.session.commit()
+        flash('Subject updated successfully!', 'success')
+    else:
+        flash('Subject not found', 'danger')
+    return redirect(url_for('admin_dashboard'))
+
+
+
 @app.route('/add_chapter/<int:subject_id>', methods=['POST'])
 def add_chapter(subject_id):
     chapter_name = request.form.get('chapter_name')
@@ -282,28 +322,40 @@ def add_chapter(subject_id):
     return redirect(url_for('admin_dashboard'))
 
 
-@app.route('/delete_chapter/<int:subject_id>/<int:chapter_id>', methods=['POST'])
-def delete_chapter(subject_id, chapter_id):
+@app.route('/delete_chapter/<int:chapter_id>', methods=['POST'])
+def delete_chapter(chapter_id):
     chapter = Chapter.query.get(chapter_id)
-    
     if not chapter:
-        flash("Chapter not found", "danger")
-        return redirect(url_for('admin_dashboard'))
-    
-    db.session.delete(chapter)
-    db.session.commit()
-    flash("Chapter deleted successfully", "success")
-    
-    return redirect(url_for('admin_dashboard'))
+        flash("Chapter not found!", "danger")
+        return redirect(url_for('quizmanagement'))
+
+    try:
+        # Assign all quizzes to a default chapter before deleting
+        default_chapter_id = 1  # Change this to the ID of your default chapter
+        Quiz.query.filter_by(chapter_id=chapter_id).update({"chapter_id": default_chapter_id})
+
+        db.session.delete(chapter)
+        db.session.commit()
+        flash("Chapter deleted successfully!", "success")
+    except Exception as e:
+        db.session.rollback()
+        flash(f"Error deleting chapter: {str(e)}", "danger")
+
+    return redirect(url_for('quizmanagement'))
+
 
 @app.route('/view_quiz/<int:quiz_id>')
 def view_quiz(quiz_id):
-    quiz = Quiz.query.get(quiz_id)
-    
-    if not quiz:
-        return "Quiz not found", 404
-    
-    return render_template('view_quiz.html', quiz=quiz)  
+    quiz = Quiz.query.get_or_404(quiz_id)
+
+    # Extract chapter name properly if it's an object
+    chapter_name = quiz.chapter.name if hasattr(quiz.chapter, 'name') else str(quiz.chapter)
+    subject_name = quiz.chapter.subject.name if hasattr(quiz.chapter, 'subject') else "Unknown"
+    # Calculate the number of questions
+    num_questions = len(quiz.questions) if quiz.questions else 0
+    print(f"Quiz Details: {quiz.id}, Chapter: {chapter_name}, Questions: {num_questions}, subject:{subject_name}")
+
+    return render_template('view_quiz.html', quiz=quiz, chapter_name=chapter_name, num_questions=num_questions,subject_name=subject_name)
 
 
 @app.route('/add_quiz', methods=['POST'])
@@ -375,7 +427,6 @@ def start_quiz(quiz_id, q_no):
                            duration=10)
 
 
-
 @app.route('/edit_quiz/<int:quiz_id>', methods=['POST'])
 def edit_quiz(quiz_id):
     quiz = Quiz.query.get(quiz_id)
@@ -410,6 +461,7 @@ def edit_quiz(quiz_id):
 @app.route('/delete_quiz/<int:quiz_id>', methods=['POST'])
 def delete_quiz(quiz_id):
     quiz = Quiz.query.get(quiz_id)
+    Question.query.filter_by(quiz_id=quiz_id).delete()
     if not quiz:
         flash("Quiz not found!", "danger")
         return redirect(url_for('quizmanagement'))
@@ -472,19 +524,162 @@ def delete_question(question_id):
         flash("Question not found!", "danger")
     return redirect(url_for('quizmanagement'))
 
-@app.route('/edit_question/<int:question_id>', methods=['GET', 'POST'])
+@app.route('/edit_question/<int:question_id>', methods=['POST'])
 def edit_question(question_id):
-    question = Question.query.get(question_id)
-    if request.method == 'POST':
-        question.text = request.form['question_text']
-        db.session.commit()
-        return redirect(url_for('quizmanagement'))
-    return render_template('edit_question.html', question=question)
+    question = Question.query.get_or_404(question_id)
+    new_text = request.form.get("questionTitle")
 
-@app.route('/submit_answer/<int:quiz_id>/<int:q_no>', methods=['POST'])
-def submit_answer(quiz_id, q_no):
-    # Your logic for handling the answer submission
-    return "Answer submitted successfully!"
+    if new_text:
+        question.question_text = new_text
+        db.session.commit()
+        flash("Question updated successfully!", "success")
+
+    return redirect(request.referrer)  # Redirect back to the same page
+
+@app.route('/submit_quiz', methods=['POST'])
+def submit_quiz():
+    user_id = session['user_id']
+    quiz_id = request.form['quiz_id']  # Assuming quiz_id is passed in the form
+    quiz = Quiz.query.get(quiz_id)
+    correct_answers = 0
+
+    # Assuming questions are submitted with their IDs and selected options
+    for question_id, selected_option in request.form.items():
+        if question_id.startswith('question_'):
+            question_id = int(question_id.replace('question_', ''))
+            question = Question.query.get(question_id)
+            if question.correct_option == int(selected_option):
+                correct_answers += 1
+
+    score = Score(user_id=user_id, quiz_id=quiz_id, score=correct_answers)
+    db.session.add(score)
+    db.session.commit()
+
+    return redirect(url_for('scores'))
+
+@app.route('/scores')
+def scores():
+    if 'user_id' not in session:
+        return redirect(url_for('userlogin')) 
+
+    user_id = session['user_id']
+    user_scores = Score.query.filter_by(user_id=user_id).all()
+
+    return render_template('scores.html', scores=user_scores)
+
+
+
+@app.route('/admin_summary')
+def admin_summary():
+    return render_template('admin_summary.html')
+
+@app.route('/charts/bar')
+def bar_chart():
+    subjects = Subject.query.all()
+    subject_names = []
+    top_scores = []
+
+    for subject in subjects:
+        max_score = db.session.query(db.func.max(Score.score))\
+            .join(Quiz).filter(Quiz.subject_id == subject.id).scalar()
+        subject_names.append(subject.name)
+        top_scores.append(max_score if max_score else 0)
+
+    plt.figure(figsize=(8, 5))
+    plt.bar(subject_names, top_scores, color='blue')
+    plt.xlabel('Subjects')
+    plt.ylabel('Top Scores')
+    plt.title('Subject-wise Top Scores')
+
+    img = io.BytesIO()
+    plt.savefig(img, format='png')
+    img.seek(0)
+    img_base64 = base64.b64encode(img.getvalue()).decode()
+    plt.close()
+
+    return render_template('admin_summary.html', chart_type='bar', image=img_base64)
+
+@app.route('/charts/pie')
+def pie_chart():
+    subjects = Subject.query.all()
+    subject_names = []
+    user_attempts = []
+
+    for subject in subjects:
+        attempts = db.session.query(db.func.count(Score.id))\
+            .join(Quiz).filter(Quiz.subject_id == subject.id).scalar()
+        subject_names.append(subject.name)
+        user_attempts.append(attempts if attempts else 0)
+
+    plt.figure(figsize=(7, 7))
+    plt.pie(user_attempts, labels=subject_names, autopct='%1.1f%%', startangle=140, colors=['red', 'blue', 'green', 'yellow'])
+    plt.title('Subject-wise User Attempts')
+
+    img = io.BytesIO()
+    plt.savefig(img, format='png')
+    img.seek(0)
+    img_base64 = base64.b64encode(img.getvalue()).decode()
+    plt.close()
+
+    return render_template('admin_summary.html', chart_type='pie', image=img_base64)
+
+@app.route('/user_summary')
+def user_summary():
+    return render_template('user_summary.html')
+
+@app.route('/charts/user_bar')
+def user_bar_chart():
+    user_id = session.get('user_id')  # Get the logged-in user's ID
+    subjects = Subject.query.all()
+    subject_names = []
+    quiz_counts = []
+
+    for subject in subjects:
+        count = db.session.query(db.func.count(Quiz.id))\
+            .join(Chapter).filter(Chapter.subject_id == subject.id).scalar()
+        subject_names.append(subject.name)
+        quiz_counts.append(count if count else 0)
+
+    # Generate bar chart
+    plt.figure(figsize=(8, 5))
+    plt.bar(subject_names, quiz_counts, color='green')
+    plt.xlabel('Subjects')
+    plt.ylabel('Number of Quizzes')
+    plt.title('Subject-wise Number of Quizzes')
+
+    img = io.BytesIO()
+    plt.savefig(img, format='png')
+    img.seek(0)
+    img_base64 = base64.b64encode(img.getvalue()).decode()
+    plt.close()
+
+    return render_template('user_summary.html', chart_type='bar', image=img_base64)
+
+@app.route('/charts/user_pie')
+def user_pie_chart():
+    user_id = session.get('user_id')  # Get the logged-in user's ID
+    subjects = Subject.query.all()
+    subject_names = []
+    marks_scored = []
+
+    for subject in subjects:
+        total_score = db.session.query(db.func.sum(Score.score))\
+            .join(Quiz).filter(Quiz.chapter.has(subject_id=subject.id), Score.user_id == user_id).scalar()
+        subject_names.append(subject.name)
+        marks_scored.append(total_score if total_score else 0)
+
+    # Generate pie chart
+    plt.figure(figsize=(7, 7))
+    plt.pie(marks_scored, labels=subject_names, autopct='%1.1f%%', startangle=140, colors=['red', 'blue', 'green', 'yellow'])
+    plt.title('Marks Scored Per Subject')
+
+    img = io.BytesIO()
+    plt.savefig(img, format='png')
+    img.seek(0)
+    img_base64 = base64.b64encode(img.getvalue()).decode()
+    plt.close()
+
+    return render_template('user_summary.html', chart_type='pie', image=img_base64)
 
 
 @app.route('/logout')
@@ -506,6 +701,8 @@ with app.app_context():
             dob='31-12-2005')
         db.session.add(pre_existing_user)
         db.session.commit()
+
+
 
 if __name__ == '__main__':
     app.run(debug=True)

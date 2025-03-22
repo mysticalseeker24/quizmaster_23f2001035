@@ -22,7 +22,7 @@
                 <div class="collapse navbar-collapse" id="navbarSupportedContent">
                     <ul class="navbar-nav me-auto mb-2 mb-lg-0">
                         <li class="nav-item"><a class="nav-link" href="{{ url_for('user_dashboard') }}">Home</a></li>
-                        <li class="nav-item"><a class="nav-link" href="{{ url_for('scores') }}">scores</a></li>
+                        <li class="nav-item"><a class="nav-link" href="{{ url_for('scores') }}">Scores</a></li>
                         <li class="nav-item"><a class="nav-link" href="#">Summary</a></li>
                         <li class="nav-item"><a class="nav-link" href="{{ url_for('index') }}">Logout</a></li>
                     </ul>
@@ -33,31 +33,37 @@
                 </div>
             </div>
         </nav>
-    </header>
-    <!-- Quiz Scores Table -->
-    <div class="container mt-4">
-        <h3 class="text-center">Quiz Scores</h3>
-        <table class="table table-bordered">
-            <thead class="table-dark">
-                <tr>
-                    <th>ID</th>
-                    <th>No. of Questions</th>
-                    <th>Date</th>
-                    <th>Score</th>
-                </tr>
-            </thead>
-            <tbody>
-                {% for score in scores %}
-                <tr>
-                    <td>{{ score.id }}</td>
-                    <td>{{ score.num_questions }}</td>
-                    <td>{{ score.date }}</td>
-                    <td>{{ score.total_scored }}/{{ score.num_questions }}</td>
-                </tr>
-                {% endfor %}
-            </tbody>
-        </table>
+    </header>   
+<!-- Quiz Scores Table -->
+<div class="container mt-4">
+    <h3 class="text-center">Quiz Scores</h3>
+    {% if scores %}
+    <table class="table table-bordered">
+        <thead class="table-dark">
+            <tr>
+                <th>Quiz ID</th>
+                <th>Quiz Name</th>
+                <th>Score</th>
+                <th>Percentage</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for score in scores %}
+            {% set quiz = score.quiz %}
+            <tr>
+                <td>{{ score.quiz_id }}</td>
+                <td>{{ quiz.name }}</td>
+                <td>{{ score.score }} out of {{ quiz.questions|length }}</td>
+                <td>{{ (score.score / quiz.questions|length) * 100|round(2) }}%</td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+    {% else %}
+    <div class="alert alert-info">
+        No scores available yet. Complete a quiz to see your results!
     </div>
-
+    {% endif %}
+</div>
 </body>
 </html>
