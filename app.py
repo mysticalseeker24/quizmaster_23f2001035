@@ -67,6 +67,8 @@ class Score(db.Model):
     timestamp = db.Column(db.String(20))
     user = db.relationship('User', backref='scores', lazy=True)
     quiz = db.relationship('Quiz', backref='scores', lazy=True)
+    __table_args__ = (db.UniqueConstraint('user_id', 'quiz_id', name='unique_user_quiz'),)
+
 
 class UserAnswer(db.Model):
     id = db.Column(db.Integer, primary_key=True)
@@ -706,4 +708,6 @@ with app.app_context():
 
 if __name__ == '__main__':
     app.run(debug=True)
+
+
 
