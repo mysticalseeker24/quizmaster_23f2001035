@@ -34,7 +34,26 @@
     <!-- Quiz Scores Table -->
     <div class="container mt-4">
         <h3 class="text-center">Quiz Scores</h3>
+        
+        {% with messages = get_flashed_messages(with_categories=true) %}
+            {% if messages %}
+                {% for category, message in messages %}
+                    <div class="alert alert-{{ category }} alert-dismissible fade show" role="alert">
+                        {{ message }}
+                        <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
+                    </div>
+                {% endfor %}
+            {% endif %}
+        {% endwith %}
+        
         {% if scores %}
+        <!-- Reset Scores Button -->
+        <div class="d-flex justify-content-end mb-3">
+            <form action="{{ url_for('reset_scores') }}" method="POST" onsubmit="return confirm('Are you sure you want to reset all your quiz scores? This action cannot be undone.')">
+                <button type="submit" class="btn btn-danger">Reset All Scores</button>
+            </form>
+        </div>
+
         <table class="table table-bordered">
             <thead class="table-dark">
                 <tr>
@@ -46,14 +65,13 @@
                 </tr>
             </thead>
             <tbody>
-                {% for score in scores %}
-                {% set quiz = score.quiz %}
+                {% for data in scores %}
                 <tr>
-                    <td>{{ score.quiz_id }}</td>
-                    <td>{{ quiz.name if quiz else 'Unknown Quiz' }}</td>
-                    <td>{{ score.score }} out of {{ quiz.questions|length if quiz else 'N/A' }}</td>
-                    <td>{{ (score.score / quiz.questions|length * 100)|round(2) if quiz else 'N/A' }}%</td>
-                    <td>{{ score.timestamp }}</td>
+                    <td>{{ data.quiz.id }}</td>
+                    <td>{{ data.quiz.name }}</td>
+                    <td>{{ data.score.score }} out of {{ data.question_count }}</td>
+                    <td>{{ data.percentage }}%</td>
+                    <td>{{ data.score.timestamp }}</td>
                 </tr>
                 {% endfor %}
             </tbody>
