@@ -75,6 +75,17 @@ class UserAnswer(db.Model):
     selected_option = db.Column(db.String(200), nullable=False)
 
 ADMIN_CREDENTIALS = {'email': 'admin@quizmaster.com', 'password': 'admin123'}
+
+@app.after_request
+def add_header(response):
+    """
+    Add headers to force no caching.
+    """
+    response.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, public, max-age=0"
+    response.headers["Pragma"] = "no-cache"
+    response.headers["Expires"] = "0"
+    return response
+
 @app.route('/')
 def index():
     return render_template('index.html')
@@ -622,23 +633,18 @@ def scores():
 
     user_id = session['user_id']
     
-    # Get user scores with detailed information about each quiz
-    # Order by timestamp descending (newest first)
+    # Fetch fresh scores from the database
     user_scores = db.session.query(Score, Quiz)\
         .join(Quiz)\
         .filter(Score.user_id == user_id)\
         .order_by(Score.timestamp.desc())\
         .all()
     
-    # Prepare the data for the template
+    # Prepare data for template
     score_data = []
     for score, quiz in user_scores:
-        # Get number of questions in the quiz
         question_count = Question.query.filter_by(quiz_id=quiz.id).count()
-        
-        # Calculate percentage
         percentage = (score.score / question_count * 100) if question_count > 0 else 0
-        
         score_data.append({
             'score': score,
             'quiz': quiz,
@@ -704,64 +710,6 @@ def pie_chart():
 
     return render_template('admin_summary.html', chart_type='pie', image=img_base64)
 
-@app.route('/user_summary')
-def user_summary():
-    return render_template('user_summary.html')
-
-@app.route('/charts/user_bar')
-def user_bar_chart():
-    user_id = session.get('user_id')  # Get the logged-in user's ID
-    subjects = Subject.query.all()
-    subject_names = []
-    quiz_counts = []
-
-    for subject in subjects:
-        count = db.session.query(db.func.count(Quiz.id))\
-            .join(Chapter).filter(Chapter.subject_id == subject.id).scalar()
-        subject_names.append(subject.name)
-        quiz_counts.append(count if count else 0)
-
-    # Generate bar chart
-    plt.figure(figsize=(8, 5))
-    plt.bar(subject_names, quiz_counts, color='green')
-    plt.xlabel('Subjects')
-    plt.ylabel('Number of Quizzes')
-    plt.title('Subject-wise Number of Quizzes')
-
-    img = io.BytesIO()
-    plt.savefig(img, format='png')
-    img.seek(0)
-    img_base64 = base64.b64encode(img.getvalue()).decode()
-    plt.close()
-
-    return render_template('user_summary.html', chart_type='bar', image=img_base64)
-
-@app.route('/charts/user_pie')
-def user_pie_chart():
-    user_id = session.get('user_id')  # Get the logged-in user's ID
-    subjects = Subject.query.all()
-    subject_names = []
-    marks_scored = []
-
-    for subject in subjects:
-        total_score = db.session.query(db.func.sum(Score.score))\
-            .join(Quiz).filter(Quiz.chapter.has(subject_id=subject.id), Score.user_id == user_id).scalar()
-        subject_names.append(subject.name)
-        marks_scored.append(total_score if total_score else 0)
-
-    # Generate pie chart
-    plt.figure(figsize=(7, 7))
-    plt.pie(marks_scored, labels=subject_names, autopct='%1.1f%%', startangle=140, colors=['red', 'blue', 'green', 'yellow'])
-    plt.title('Marks Scored Per Subject')
-
-    img = io.BytesIO()
-    plt.savefig(img, format='png')
-    img.seek(0)
-    img_base64 = base64.b64encode(img.getvalue()).decode()
-    plt.close()
-
-    return render_template('user_summary.html', chart_type='pie', image=img_base64)
-
 
 @app.route('/reset_scores', methods=['POST'])
 def reset_scores():
@@ -770,12 +718,27 @@ def reset_scores():
     
     user_id = session['user_id']
     
-    # Delete all scores for this user
-    Score.query.filter_by(user_id=user_id).delete()
-    db.session.commit()
+    try:
+        # Delete all UserAnswer entries for this user
+        UserAnswer.query.filter(UserAnswer.quiz_id.in_(
+            db.session.query(Score.quiz_id).filter_by(user_id=user_id)
+        )).delete(synchronize_session=False)
+        
+        # Delete all scores for this user
+        Score.query.filter_by(user_id=user_id).delete()
+        
+        db.session.commit()
+        flash("All your quiz scores have been reset successfully!", "success")
+    except Exception as e:
+        db.session.rollback()
+        flash(f"Error resetting scores: {str(e)}", "danger")
     
-    flash("All your quiz scores have been reset successfully!", "success")
     return redirect(url_for('scores'))
+
+
+@app.route('/user_summary')
+def user_summary():
+    return render_template('user_summary.html')
 
 @app.route('/logout')
 def logout():
@@ -800,9 +763,4 @@ with app.app_context():
 
 
 if __name__ == '__main__':
-    app.run(debug=True)
-<<<<<<< HEAD
-
-
-=======
->>>>>>> e24719288186b486d13fc20dd0bf4db9506b7d1f
+    app.run(debug=True) 

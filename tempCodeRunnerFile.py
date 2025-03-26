@@ -67,8 +67,6 @@ class Score(db.Model):
     timestamp = db.Column(db.String(20))
     user = db.relationship('User', backref='scores', lazy=True)
     quiz = db.relationship('Quiz', backref='scores', lazy=True)
-    __table_args__ = (db.UniqueConstraint('user_id', 'quiz_id', name='unique_user_quiz'),)
-
 
 class UserAnswer(db.Model):
     id = db.Column(db.Integer, primary_key=True)
@@ -122,6 +120,7 @@ def userlogin():
         if user and check_password_hash(user.password, password):
             session['user_id'] = user.id
             session['email'] = user.email
+            session['fullname'] = user.full_name  # Add full name to session
             flash("Login successful!", "success")
             return redirect(url_for('user_dashboard'))
         else:
@@ -398,26 +397,33 @@ def start_quiz(quiz_id, q_no):
     
     # If no more questions, go to summary
     if q_no > total_questions:
-        return redirect(url_for('scores', quiz_id=quiz_id))
+        # Calculate and save score before redirecting
+        calculate_score(quiz_id)
+        return redirect(url_for('scores'))
 
     question = Question.query.filter_by(quiz_id=quiz_id).offset(q_no - 1).first()
     options_list = [question.option1, question.option2, question.option3, question.option4] if question else []
 
     if request.method == 'POST':
         selected_option = request.form.get('answer')
+        action = request.form.get('action')
         
         if not selected_option:
             flash("Please select an option before proceeding.", "danger")
             return redirect(url_for('start_quiz', quiz_id=quiz_id, q_no=q_no))
 
+        # Save user's answer
         answer_entry = UserAnswer(quiz_id=quiz_id, question_id=question.id, selected_option=selected_option)
         db.session.add(answer_entry)
         db.session.commit()
 
         if q_no == total_questions:
-            flash("Answer submitted successfully!", "success")
-            return redirect(url_for('scores', quiz_id=quiz_id))
+            # Last question - calculate score and save it
+            calculate_score(quiz_id)
+            flash("Quiz completed successfully! Check your score below.", "success")
+            return redirect(url_for('scores'))
         else:
+            # More questions to go
             return redirect(url_for('start_quiz', quiz_id=quiz_id, q_no=q_no + 1))
 
     return render_template('start_quiz.html', 
@@ -428,6 +434,41 @@ def start_quiz(quiz_id, q_no):
                            total_questions=total_questions, 
                            duration=10)
 
+# Helper function to calculate and save score
+def calculate_score(quiz_id):
+    if 'user_id' not in session:
+        return
+        
+    user_id = session['user_id']
+    
+    # Get all questions for this quiz
+    all_questions = Question.query.filter_by(quiz_id=quiz_id).all()
+    
+    # Get answers for this quiz - we'll filter by the quiz_id since answers are saved in the current session
+    user_answers = UserAnswer.query.filter(UserAnswer.quiz_id == quiz_id).all()
+    
+    # Calculate score
+    correct_answers = 0
+    for question in all_questions:
+        for answer in user_answers:
+            if answer.question_id == question.id:
+                # Check if the answer matches correct option
+                question_option_field = f"option{question.correct_option}"
+                correct_option_text = getattr(question, question_option_field)
+                if answer.selected_option == correct_option_text:
+                    correct_answers += 1
+                break
+    
+    # Add timestamp
+    import datetime
+    current_time = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    
+    # Always create a new score record for each quiz attempt
+    score = Score(user_id=user_id, quiz_id=quiz_id, score=correct_answers, timestamp=current_time)
+    db.session.add(score)
+    db.session.commit()
+    
+    return correct_answers
 
 @app.route('/edit_quiz/<int:quiz_id>', methods=['POST'])
 def edit_quiz(quiz_id):
@@ -553,10 +594,25 @@ def submit_quiz():
             if question.correct_option == int(selected_option):
                 correct_answers += 1
 
-    score = Score(user_id=user_id, quiz_id=quiz_id, score=correct_answers)
-    db.session.add(score)
-    db.session.commit()
+    # Add timestamp to the score
+    import datetime
+    current_time = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    
+    # Check if a score already exists for this user and quiz
+    existing_score = Score.query.filter_by(user_id=user_id, quiz_id=quiz_id).first()
+    if existing_score:
+        # Update existing score if it's higher
+        if correct_answers > existing_score.score:
+            existing_score.score = correct_answers
+            existing_score.timestamp = current_time
+            db.session.commit()
+    else:
+        # Create new score record
+        score = Score(user_id=user_id, quiz_id=quiz_id, score=correct_answers, timestamp=current_time)
+        db.session.add(score)
+        db.session.commit()
 
+    flash(f"Quiz submitted successfully! Your score: {correct_answers}", "success")
     return redirect(url_for('scores'))
 
 @app.route('/scores')
@@ -565,9 +621,27 @@ def scores():
         return redirect(url_for('userlogin')) 
 
     user_id = session['user_id']
-    user_scores = Score.query.filter_by(user_id=user_id).all()
+    
+    # Fetch fresh scores from the database
+    user_scores = db.session.query(Score, Quiz)\
+        .join(Quiz)\
+        .filter(Score.user_id == user_id)\
+        .order_by(Score.timestamp.desc())\
+        .all()
+    
+    # Prepare the data for the template
+    score_data = []
+    for score, quiz in user_scores:
+        question_count = Question.query.filter_by(quiz_id=quiz.id).count()
+        percentage = (score.score / question_count * 100) if question_count > 0 else 0
+        score_data.append({
+            'score': score,
+            'quiz': quiz,
+            'question_count': question_count,
+            'percentage': round(percentage, 2)
+        })
 
-    return render_template('scores.html', scores=user_scores)
+    return render_template('scores.html', scores=score_data)
 
 
 
@@ -583,7 +657,7 @@ def bar_chart():
 
     for subject in subjects:
         max_score = db.session.query(db.func.max(Score.score))\
-            .join(Quiz).filter(Quiz.subject_id == subject.id).scalar()
+            .join(Quiz).filter(Quiz.chapter.has(subject_id=subject.id)).scalar()
         subject_names.append(subject.name)
         top_scores.append(max_score if max_score else 0)
 
@@ -609,7 +683,7 @@ def pie_chart():
 
     for subject in subjects:
         attempts = db.session.query(db.func.count(Score.id))\
-            .join(Quiz).filter(Quiz.subject_id == subject.id).scalar()
+            .join(Quiz).filter(Quiz.chapter.has(subject_id=subject.id)).scalar()
         subject_names.append(subject.name)
         user_attempts.append(attempts if attempts else 0)
 
@@ -625,63 +699,29 @@ def pie_chart():
 
     return render_template('admin_summary.html', chart_type='pie', image=img_base64)
 
+
+@app.route('/reset_scores', methods=['POST'])
+def reset_scores():
+    if 'user_id' not in session:
+        return redirect(url_for('userlogin'))
+    
+    user_id = session['user_id']
+    
+    try:
+        # Delete all scores for this user
+        Score.query.filter_by(user_id=user_id).delete()
+        db.session.commit()
+        flash("All your quiz scores have been reset successfully!", "success")
+    except Exception as e:
+        db.session.rollback()
+        flash(f"Error resetting scores: {str(e)}", "danger")
+    
+    return redirect(url_for('scores'))
+
 @app.route('/user_summary')
 def user_summary():
     return render_template('user_summary.html')
 
-@app.route('/charts/user_bar')
-def user_bar_chart():
-    user_id = session.get('user_id')  # Get the logged-in user's ID
-    subjects = Subject.query.all()
-    subject_names = []
-    quiz_counts = []
-
-    for subject in subjects:
-        count = db.session.query(db.func.count(Quiz.id))\
-            .join(Chapter).filter(Chapter.subject_id == subject.id).scalar()
-        subject_names.append(subject.name)
-        quiz_counts.append(count if count else 0)
-
-    # Generate bar chart
-    plt.figure(figsize=(8, 5))
-    plt.bar(subject_names, quiz_counts, color='green')
-    plt.xlabel('Subjects')
-    plt.ylabel('Number of Quizzes')
-    plt.title('Subject-wise Number of Quizzes')
-
-    img = io.BytesIO()
-    plt.savefig(img, format='png')
-    img.seek(0)
-    img_base64 = base64.b64encode(img.getvalue()).decode()
-    plt.close()
-
-    return render_template('user_summary.html', chart_type='bar', image=img_base64)
-
-@app.route('/charts/user_pie')
-def user_pie_chart():
-    user_id = session.get('user_id')  # Get the logged-in user's ID
-    subjects = Subject.query.all()
-    subject_names = []
-    marks_scored = []
-
-    for subject in subjects:
-        total_score = db.session.query(db.func.sum(Score.score))\
-            .join(Quiz).filter(Quiz.chapter.has(subject_id=subject.id), Score.user_id == user_id).scalar()
-        subject_names.append(subject.name)
-        marks_scored.append(total_score if total_score else 0)
-
-    # Generate pie chart
-    plt.figure(figsize=(7, 7))
-    plt.pie(marks_scored, labels=subject_names, autopct='%1.1f%%', startangle=140, colors=['red', 'blue', 'green', 'yellow'])
-    plt.title('Marks Scored Per Subject')
-
-    img = io.BytesIO()
-    plt.savefig(img, format='png')
-    img.seek(0)
-    img_base64 = base64.b64encode(img.getvalue()).decode()
-    plt.close()
-
-    return render_template('user_summary.html', chart_type='pie', image=img_base64)
 
 
 @app.route('/logout')
@@ -707,6 +747,4 @@ with app.app_context():
 
 
 if __name__ == '__main__':
-    app.run(debug=True)
-
-
+    app.run(debug=True) 
